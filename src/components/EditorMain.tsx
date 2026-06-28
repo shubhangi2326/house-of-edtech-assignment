@@ -1,3 +1,35 @@
+// "use client";
+// import React from 'react';
+// import { EditorContent } from '@tiptap/react';
+// import { Shield, Save, Trash2 } from 'lucide-react';
+
+// export default function EditorMain({ role, editor, handleSaveSnapshot }: any) {
+//   return (
+//     <div className="w-full flex flex-col items-center">
+//       {/* Editor Paper: Full width on mobile, max-w-3xl on desktop */}
+//       <div className="w-full lg:max-w-3xl bg-white min-h-[90vh] shadow-xl sm:shadow-2xl border border-slate-200 rounded-lg p-6 sm:p-10 md:p-16 relative">
+//         <div className="flex justify-between items-center mb-10">
+//           <div className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+//             <Shield size={14}/> {role} ACCESS
+//           </div>
+          
+//           <div className="flex gap-2">
+//             <button onClick={handleSaveSnapshot} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition border border-emerald-100">
+//               <Save size={18}/>
+//             </button>
+//             <button onClick={() => editor?.commands.setContent("")} className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition border border-rose-100">
+//               <Trash2 size={18}/>
+//             </button>
+//           </div>
+//         </div>
+
+//         <div className="prose max-w-none text-slate-900">
+//           <EditorContent editor={editor} />
+//         </div>
+//       </div>
+//     </div>
+//   );
+// }
 
 "use client";
 import React, { useState, useEffect } from 'react';
@@ -6,6 +38,8 @@ import { Shield, Save, Trash2, Lock, Edit3, Eye } from 'lucide-react';
 
 export default function EditorMain({ role, editor, handleSaveSnapshot }: any) {
   const [isEditing, setIsEditing] = useState(false);
+
+  // Sync editor editable state with local state
   useEffect(() => {
     if (editor) {
       editor.setEditable(role !== 'VIEWER' && isEditing);
@@ -42,6 +76,7 @@ export default function EditorMain({ role, editor, handleSaveSnapshot }: any) {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* EDITOR & OWNER both can Save Snapshots */}
             {role !== 'VIEWER' && (
               <button 
                 onClick={handleSaveSnapshot}
