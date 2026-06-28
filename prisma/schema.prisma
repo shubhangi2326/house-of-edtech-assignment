@@ -1,0 +1,37 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 1. Document Model: Main table for active collaboration
+model Document {
+  id            String    @id @default(cuid())
+  title         String    @default("Untitled Document")
+  userId        String    // Mandatory for Tenant Isolation (Auth Requirement)
+  content       String?   @db.Text // HTML representation for quick previews
+  contentBinary Bytes?    // CRDT state vector (Mandatory for Deterministic Sync)
+  updatedAt     DateTime  @updatedAt
+  versions      Version[]
+
+  // Real-world consideration: Indexing for faster lookups
+  @@index([userId])
+}
+
+// 2. Version Model: Table for Granular Version Control & Time Travel
+model Version {
+  id         String   @id @default(cuid())
+  documentId String
+  content    String   @db.Text   // Snapshot content in HTML
+  updateData Bytes?              // Binary update to revert state accurately
+  label      String?             // For user-defined version names
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  // Indexing for performance
+  @@index([documentId])
+}
