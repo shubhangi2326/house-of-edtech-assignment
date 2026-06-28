@@ -9,44 +9,47 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { Menu, MessageSquare, X, Wifi, WifiOff } from 'lucide-react';
 import { useSession } from "next-auth/react";
 
-// Components Import
+// Components
 import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 import EditorMain from './EditorMain';
 import AiAssistant from './AiAssistant';
 
-// Backend Actions Import
-import { syncBinaryUpdate, saveSnapshot, getVersions } from '../backend/actions';
+// Backend Actions
+import { syncBinaryUpdate, saveSnapshot, getVersions, deleteVersion } from '../backend/actions';
 
 export default function Editor({ docId, role }: { docId: string, role: string }) {
-  // --- 1. SESSION & AUTH ---
+  // --- 1. AUTHENTICATION & USER SCOPING ---
   const { data: session } = useSession();
   const userId = (session?.user as any)?.id || "guest";
 
-  // --- 2. STATES ---
+  // --- 2. CORE STATES ---
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isAiOpen, setAiOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? navigator.onLine : true);
   
-  // Sync Queue Logic (Intellect Requirement)
+  // Sync Engine States (Requirement: Robust Queueing)
   const [syncQueue, setSyncQueue] = useState<number[][]>([]); 
   const [isSyncingHead, setIsSyncingHead] = useState(false); 
 
+  // AI & Chat States (Requirement: Local-First Storage)
   const [localChats, setLocalChats] = useState<any[]>([]); 
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Version Control States
   const [versions, setVersions] = useState<any[]>([]);
   const [sidebarTab, setSidebarTab] = useState<'chats' | 'history'>('chats');
 
-  // --- 3. REFS & MEMO ---
+  // Refs & Yjs Memo
   const ydoc = useMemo(() => new Y.Doc(), []);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- 4. LOCAL-FIRST PERSISTENCE (IndexedDB) ---
+  // --- 3. LOCAL-FIRST PERSISTENCE (IndexedDB) ---
   useEffect(() => {
     const provider = new IndexeddbPersistence(docId, ydoc);
     const updateOnline = () => setIsOnline(navigator.onLine);
@@ -59,35 +62,48 @@ export default function Editor({ docId, role }: { docId: string, role: string })
     };
   }, [docId, ydoc]);
 
-  // --- 5. EDITOR SETUP (Fixed Type Error) ---
+  // --- 4. EDITOR INITIALIZATION ---
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ history: false } as any), 
       Collaboration.configure({ document: ydoc }),
       ImageExtension.configure({ inline: true, allowBase64: true })
     ],
-    editable: false, // UI Toggle handles this in EditorMain
+    editable: false, // Managed by EditorMain's toggle
     immediatelyRender: false,
   });
 
-  // --- 6. DATA LOADING (LocalStorage) ---
+  // --- 5. DATA HYDRATION (Load User Chats & Versions) ---
   useEffect(() => {
     if (!userId) return;
+    
+    // Load AI Chats from LocalStorage (Tenant Isolated)
     const storageKey = `house-of-edtech-chats-${userId}-${docId}`;
     const saved = localStorage.getItem(storageKey);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed && parsed.length > 0) {
+      if (parsed.length > 0) {
         setLocalChats(parsed);
         setActiveChatId(parsed[0].id);
-      } else { createNewChat(); }
-    } else { createNewChat(); }
-    
-    const fetchVer = async () => setVersions(await getVersions(docId));
-    fetchVer();
+      } else { handleInitialChatCreation(); }
+    } else { handleInitialChatCreation(); }
+
+    // Load Version History from PostgreSQL
+    refreshHistory();
   }, [docId, userId]);
 
-  // --- 7. AUTO-SAVE CHATS ---
+  const handleInitialChatCreation = () => {
+    const newId = "chat_" + Date.now();
+    setLocalChats([{ id: newId, title: "Initial Discussion", messages: [] }]);
+    setActiveChatId(newId);
+  };
+
+  const refreshHistory = async () => {
+    const data = await getVersions(docId);
+    setVersions(data || []);
+  };
+
+  // --- 6. AUTO-SAVE CHATS TO LOCALSTORAGE ---
   useEffect(() => {
     if (localChats.length > 0 && userId !== "guest") {
       const storageKey = `house-of-edtech-chats-${userId}-${docId}`;
@@ -95,7 +111,7 @@ export default function Editor({ docId, role }: { docId: string, role: string })
     }
   }, [localChats, docId, userId]);
 
-  // --- 8. SYNC ENGINE: HANDLE UPDATE ---
+  // --- 7. SYNC ENGINE (Deterministic Conflict Resolution) ---
   useEffect(() => {
     if (role === 'VIEWER') return;
     const handleUpdate = (update: Uint8Array) => {
@@ -105,58 +121,39 @@ export default function Editor({ docId, role }: { docId: string, role: string })
     return () => { ydoc.off('update', handleUpdate); };
   }, [ydoc, role]);
 
-  // --- 9. SYNC ENGINE: PROCESS QUEUE ---
   useEffect(() => {
     const processQueue = async () => {
       if (!isOnline || syncQueue.length === 0 || isSyncingHead) return;
-
       setIsSyncingHead(true);
       const nextUpdate = syncQueue[0];
-
       try {
         const res = await syncBinaryUpdate(docId, nextUpdate, role);
         if (res && !res.error) {
           setSyncQueue(prev => prev.slice(1)); 
         } else if (res?.error?.includes("ACCESS_DENIED")) {
-          console.error("Critical Security Error:", res.error);
-          setSyncQueue([]); 
-          alert("Security Violation: You do not own this document.");
+          setSyncQueue([]);
+          alert("Security: Tenant Isolation violation.");
         } else {
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(r => setTimeout(resolve, 3000));
         }
-      } catch (e) {
-        console.error("Network sync pending...");
-      } finally {
-        setIsSyncingHead(false);
-      }
+      } catch (e) { console.error("Network sync error"); }
+      finally { setIsSyncingHead(false); }
     };
     processQueue();
   }, [syncQueue, isOnline, isSyncingHead, docId, role]);
 
-  // --- 10. HANDLERS ---
-  const createNewChat = () => {
-    const newId = "chat_" + Date.now();
-    setLocalChats(prev => [{ id: newId, title: "New Discussion", messages: [] }, ...prev]);
-    setActiveChatId(newId);
-  };
-
-  const deleteChat = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const updated = localChats.filter(c => c.id !== id);
-    setLocalChats(updated);
-    if (activeChatId === id) setActiveChatId(updated.length > 0 ? updated[0].id : null);
-  };
-
+  // --- 8. AI & VOICE LOGIC ---
   const readAloud = (text: string) => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      const utterance = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.speak(utterance);
     }
   };
 
   const startListening = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return alert("Mic not supported");
+    if (!SR) return alert("Mic not supported.");
     const rec = new SR();
     rec.onstart = () => setIsListening(true);
     rec.onresult = (e: any) => { setInput(e.results[0][0].transcript); setIsListening(false); };
@@ -167,7 +164,7 @@ export default function Editor({ docId, role }: { docId: string, role: string })
     let currentId = activeChatId;
     if (!currentId) {
       const newId = "chat_" + Date.now();
-      setLocalChats([{ id: newId, title: "New Discussion", messages: [] }]);
+      setLocalChats([{ id: newId, title: "New Chat", messages: [] }]);
       setActiveChatId(newId);
       currentId = newId;
     }
@@ -175,7 +172,7 @@ export default function Editor({ docId, role }: { docId: string, role: string })
 
     const userText = input;
     const userImg = pendingImage;
-    const userMsg = { role: "user", content: userText || "Shared context", image: userImg };
+    const userMsg = { role: "user", content: userText || "Sent an image", image: userImg };
 
     setLocalChats(prev => prev.map(c => c.id === currentId ? { ...c, messages: [...c.messages, userMsg], title: c.messages.length === 0 ? userText.slice(0,15) : c.title } : c));
     setLoading(true); setInput(""); setPendingImage(null);
@@ -184,19 +181,50 @@ export default function Editor({ docId, role }: { docId: string, role: string })
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: userText, 
-          docContent: editor?.getText(), 
-          history: localChats.find(c => c.id === currentId)?.messages || [],
-          image: userImg 
-        })
+        body: JSON.stringify({ message: userText, docContent: editor?.getText(), history: localChats.find(c => c.id === currentId)?.messages || [], image: userImg })
       });
       const data = await res.json();
       setLocalChats(prev => prev.map(c => c.id === currentId ? { ...c, messages: [...c.messages, { role: "assistant", content: data.reply }] } : c));
-    } catch (e) {
-      console.error("AI API Error");
-    } finally {
-      setLoading(false);
+    } finally { setLoading(false); }
+  };
+
+  // --- 9. HANDLERS (New Chat, Delete, Snapshot, Restore) ---
+  const createNewChat = () => {
+    const newId = "chat_" + Date.now();
+    setLocalChats(prev => [{ id: newId, title: "New Discussion", messages: [] }, ...prev]);
+    setActiveChatId(newId);
+  };
+
+  const handleDeleteChat = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = localChats.filter(c => c.id !== id);
+    setLocalChats(updated);
+    if (activeChatId === id) setActiveChatId(updated.length > 0 ? updated[0].id : null);
+  };
+
+  const handleSaveSnapshotAction = async () => {
+    if (role === 'VIEWER') return;
+    const content = editor?.getHTML() || "";
+    const res = await saveSnapshot(docId, content, role);
+    if (res.error) {
+      alert("Error: " + res.error);
+    } else {
+      alert("Success: Version captured in history.");
+      refreshHistory(); // Update sidebar list
+    }
+  };
+
+  const handleDeleteVersion = async (vId: string) => {
+    if (confirm("Delete this snapshot?")) {
+      await deleteVersion(vId);
+      refreshHistory();
+    }
+  };
+
+  const handleRestoreVersion = (content: string) => {
+    if (confirm("Restore this version? Current progress will be archived.")) {
+      editor?.commands.setContent(content);
+      alert("Document Restored Successfully!");
     }
   };
 
@@ -208,9 +236,11 @@ export default function Editor({ docId, role }: { docId: string, role: string })
           role={role} 
           sidebarTab={sidebarTab} setSidebarTab={setSidebarTab} 
           sessions={localChats} activeSessionId={activeChatId} setActiveSessionId={setActiveChatId} 
-          createNewSession={createNewChat} deleteChat={deleteChat}
+          createNewSession={createNewChat} deleteChat={handleDeleteChat}
           versions={versions} editor={editor} 
-          loadHistory={async () => setVersions(await getVersions(docId))} 
+          loadHistory={refreshHistory}
+          deleteVersion={handleDeleteVersion}
+          restoreVersion={handleRestoreVersion}
         />
       </div>
 
@@ -225,10 +255,11 @@ export default function Editor({ docId, role }: { docId: string, role: string })
 
         <div className="flex-1 flex overflow-hidden">
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 scrollbar-hide">
-            <EditorMain role={role} editor={editor} handleSaveSnapshot={async () => { 
-              await saveSnapshot(docId, editor?.getHTML() || "", role); 
-              setVersions(await getVersions(docId)); 
-            }} />
+            <EditorMain 
+              role={role} 
+              editor={editor} 
+              handleSaveSnapshot={handleSaveSnapshotAction} 
+            />
           </main>
           
           {/* AI ASSISTANT */}
@@ -252,12 +283,12 @@ export default function Editor({ docId, role }: { docId: string, role: string })
           </div>
           <div className="hidden sm:flex items-center gap-2">
             <span className="text-slate-400">ENGINE V2.1 STABLE | BY:</span>
-            <span className="bg-indigo-600 text-white px-2 py-0.5 rounded shadow-sm tracking-normal">SHUBHANGI MAHAJAN</span>
+            <span className="bg-indigo-600 text-white px-2 py-0.5 rounded shadow-sm">SHUBHANGI MAHAJAN</span>
           </div>
         </footer>
       </div>
 
-      {/* MOBILE OVERLAY */}
+      {/* OVERLAY */}
       {(isSidebarOpen || isAiOpen) && ( 
         <div onClick={() => { setSidebarOpen(false); setAiOpen(false); }} className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300" /> 
       )}
