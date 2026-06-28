@@ -48,12 +48,15 @@ const [isSyncingHead, setIsSyncingHead] = useState(false);
       window.removeEventListener('offline', updateOnline);
     };
   }, [docId, ydoc]);
-
-  const editor = useEditor({
-    extensions: [StarterKit.configure({ history: false }), Collaboration.configure({ document: ydoc }), ImageExtension.configure({ inline: true, allowBase64: true })],
-    editable: false,
-    immediatelyRender: false,
-  });
+const editor = useEditor({
+  extensions: [
+    StarterKit.configure({ history: false } as any), 
+    Collaboration.configure({ document: ydoc }),
+    ImageExtension.configure({ inline: true, allowBase64: true })
+  ],
+  editable: false,
+  immediatelyRender: false,
+});
 
   useEffect(() => {
     if (!userId) return;
