@@ -8,7 +8,6 @@ export default function AiAssistant({
   readAloud, fileInputRef, chatEndRef, closeAi 
 }: any) {
 
-  // Auto Scroll logic - ensures latest messages are always visible
   useEffect(() => {
     chatEndRef?.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeSession?.messages, loading, chatEndRef]);
