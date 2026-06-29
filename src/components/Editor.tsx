@@ -102,7 +102,7 @@ export default function Editor({ docId, role }: { docId: string, role: string })
     return () => { ydoc.off('update', handleUp); };
   }, [ydoc, role]);
 
-useEffect(() => {
+  useEffect(() => {
     const processQueue = async () => {
       if (syncQueue.length === 0 || isSyncingHead) return;
       
@@ -111,15 +111,17 @@ useEffect(() => {
       
       try {
         const res = await syncBinaryUpdate(docId, nextUpdate, role);
+        
         if (res && !res.error) {
           setSyncQueue(prev => prev.slice(1)); 
-          setIsOnline(true); // Sync success = Online
+          setIsOnline(true); 
         } else {
-          setIsOnline(false); // Sync fail = Offline
-          await new Promise(r => setTimeout(r, 5000));
+          setIsOnline(false); 
+          await new Promise(r => setTimeout(r, 5000)); 
         }
       } catch (e) {
-        setIsOnline(false); // Exception = Offline
+        setIsOnline(false); 
+        console.log(">>> Network unreachable, entering offline mode.");
         await new Promise(r => setTimeout(r, 5000));
       } finally {
         setIsSyncingHead(false);
